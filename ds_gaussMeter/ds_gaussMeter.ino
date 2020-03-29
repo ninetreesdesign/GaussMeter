@@ -24,9 +24,10 @@
 #define Pln Serial.println
 
 ///////////////////////////////////////////////////////////////////////////////////
-const String   VERSION_NUM   = "v0.9 GaussMeter";    //
+const String   TITLE   = "Gauss Meter";    //
+const String   VERSION_NUM   = "v1.1";    //
+const uint16_t LED_INTERVAL  = 1000;
 const uint16_t HES_INTERVAL  = 250;
-const uint16_t LED_INTERVAL  = 100;
 const bool     HWSERIAL_FLAG = 0;           // send msgs to hardware serial port
 const bool     CONSOLE_FLAG  = 1;           // Route text msgs to standard output port
 ///////////////////////////////////////////////////////////////////////////////////
@@ -47,6 +48,7 @@ const uint16_t status_led_flash_duration = 12;
 const uint16_t ADC_MAX_VAL = 16;            // number of bits
 
 char    msg[40];                            // container for print strings
+char    pole[2];
 uint16_t sec = 0;
 
 elapsedMillis since_sec     = 0;            // ms to count a sec
@@ -54,32 +56,32 @@ elapsedMillis since_hes     = 0;
 elapsedMillis since_led     = 0;
 
 Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET_PIN);
-// --- -------------------------------------------------------------------------------------------
+///
 
 void setup() {
     initializeStuff();                  // IO pin states, serial comm
     readADC(HES_PIN);
-
 }
 
 
 void loop() {
-    float ADC;
     const float ofst = -0.210;
     const float Vref = 3.3;
     const float G_scale = -1 * 1/0.005;   // polarity and sensor's sensitivity    // 5mV per G
-    float k = 0.9;
+    float k = 0.80;
     static float V;
     static float V_prev = 0;
 
     if (since_sec >= 1000) {
         since_sec = 0;
         sec ++;
+#if 0
         display.setTextSize(SMALL);
-        display.setCursor(76,57);
+        display.setCursor(0,20);
         sprintf(msg,"%05d", sec);
         display.print(msg);
         display.display();
+#endif
     }
 
     if (since_hes >= HES_INTERVAL) {
@@ -91,15 +93,23 @@ void loop() {
         V_prev = V;
         float G = G_scale * (V - ofst - Vref/2);    // mid value is 0 flux; N/S indicated by polarity
         if (abs(G) < 2.0) G = 0;    // ignore small fluctuations near zero
-        if (sec>1) {
-            display.setTextSize(LARGE);
-            display.setCursor(18,28);
-            sprintf(msg,"%4.0f", G);
+        if (sec>1) {                // wait for value to settle at beginning
+            display.setTextSize(XLARGE);
+            display.setCursor(0,36);   // shortens the minus sign if present
+            sprintf(msg,"%4.0f", abs(G));
             display.print(msg); 
+            display.setTextSize(LARGE);
+            display.setCursor(0,33);
+            pole[1] = '\0';
+            (G > 0) ? pole[0] = 'N' : pole[0] = 'S';  // print the pole
+            display.print(pole);
             display.display();
-         //   Serial.printf("    %5.3fV  %5.1f G \n", V, G);
+            // Serial.printf("    %5.3fV  %5.1f G ", V, G);
+            Serial.printf("    %5.3f V   [%s] %5.1f G \r", pole, abs(G));
+            E("\n");
         }
     }
+
 #if 0
     // flash status led each interval (second)
     if (since_led >= LED_INTERVAL) {
@@ -108,17 +118,6 @@ void loop() {
     }
     if (since_led >= status_led_flash_duration) {   // turn off led after N ms
         analogWrite(STATUS_LED_PIN,0);
-    }
-#endif
-#if 0
-    if (since_led >= LED_INTERVAL) {
-        since_led = 0;
-        static int brightness = 0;
-        static int dir = 1;
-        brightness += dir * 1;
-        Serial.printf(" %3d  %2d\n", brightness, dir);
-        analogWrite(STATUS_LED_PIN,brightness);
-        if (brightness > 40 || brightness < 1) dir *= -1;
     }
 #endif
 }
@@ -136,8 +135,10 @@ uint16_t readADC(byte addr) {
         }
         ADC /= N;
         digitalWriteFast(MAG_PWR_PIN,0);
+        return ADC;
 }
 
+///
 void splashLED(uint8_t pin, uint8_t n) {
     for (uint8_t i = 0; i < n; i++) {
         digitalWriteFast(pin, 1);
@@ -155,6 +156,7 @@ void echoString(String str) {                   // print Arduino String
     if (HWSERIAL_FLAG) HWSERIAL.print(str);     // print to HW serial port
 }
 
+///
 void initializeStuff() {
     pinMode(STATUS_LED_PIN,OUTPUT);
     pinMode(LED_BUILTIN,OUTPUT);
@@ -176,13 +178,20 @@ void initializeStuff() {
     }
     display.setTextWrap(false);
     display.setTextColor(WHITE,BLACK);
-    display.setTextSize(MED);
-    display.setCursor(0,0);
+
     display.clearDisplay();
     display.display();
     delay(200);
-    display.print(VERSION_NUM); 
-    display.display();   
+    display.setTextSize(MED);
+    display.setCursor(76,0);
+    display.print(VERSION_NUM);
+    display.display();
+    delay(600);
+    display.clearDisplay();
+    display.setTextSize(MED);
+    display.setCursor(0,0);
+    display.print(TITLE); 
+
 
 
     delay(400);  // initialize console Serial port
