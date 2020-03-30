@@ -54,7 +54,7 @@ uint16_t sec = 0;
 const float ofst = 0; //-0.210;
 const float V_ref = 3.3;
 const float G_scale = -1 * 1/0.005;         // polarity and sensor's sensitivity    // 5mV per G
-float k = 0.70;                             // smoothing factor
+float k = 0.90;                             // smoothing factor
 
 elapsedMillis since_sec     = 0;            // ms to count a sec
 elapsedMillis since_hes     = 0;
@@ -74,20 +74,6 @@ void loop() {
     static float V_prev = 0;
     pole[1] = '\0';
 
-    if (since_sec >= 1000) {
-        since_sec = 0;
-        sec ++;
-        if (PRINT_TIME_FLAG) {
-            display.setTextSize(SMALL);
-            display.setCursor(0,20);
-            sprintf(msg,"  %05d sec", sec);
-            display.print(msg);
-            display.display();
-            P(msg);
-            P("\n");
-        }
-    }
-
     if (since_hes >= HES_INTERVAL) {                // update reading to display
         since_hes = 0;
         uint16_t adc = analogRead(HES_PIN);
@@ -100,11 +86,11 @@ void loop() {
             oledDrawBarGraph(G);
             // print Gauss value
             display.setTextSize(XLARGE);
-            display.setCursor(-2,36);
+            display.setCursor(-4,37);
             sprintf(msg,"%4.0f", abs(G));
             display.print(msg);
             display.setTextSize(LARGE);
-            display.setCursor(112,36);   
+            display.setCursor(112,36);  // on bottom row of pixels 
             // print the pole
             if (abs(G) <= 3)  pole[0] = ' ';
             else if (G > 0)   pole[0] = 'N';
@@ -112,6 +98,20 @@ void loop() {
             display.print(pole);
             display.display();
             Pf("    %5u %5.3fV %5.1fG %s \r", adc, V, abs(G), pole);
+            P("\n");
+        }
+    }
+
+    if (since_sec >= 1000) {
+        since_sec = 0;
+        sec ++;
+        if (PRINT_TIME_FLAG) {
+            display.setTextSize(SMALL);
+            display.setCursor(0,20);
+            sprintf(msg,"  %05d sec", sec);
+            display.print(msg);
+            display.display();
+            P(msg);
             P("\n");
         }
     }
@@ -129,37 +129,10 @@ void loop() {
 
 
 /* Functions */
-void oledDrawBarGraph(int val) {
-    // hardcode range of G (val)
-    byte SCRN_W = 128;
-    byte SCRN_W2 = SCRN_W / 2;
-    byte TOP = 22;
-    int w = map(int(abs(val)),1,(V_ref*abs(G_scale)/2),0,SCRN_W2);
-    display.fillRect(0,TOP,SCRN_W,6,0);
-    //display.fillRect((val>0)?SCRN_W2:SCRN_W2-w,22,w,5,1);
-    for (int i = 0; i < SCRN_W; i++) {
-        display.drawLine(i,TOP+5, i,TOP+5, (i % 4 > 0));    // draw H axis
-    }
-    display.fillRect(SCRN_W2-1,TOP-1,3,8,1);  // center mark
-    // draw a bunch of short vertical lines to make bar graph
-    if (val >= 0) {
-        for (int i = 0; i < w; i++) {
-            display.drawLine(i+SCRN_W2+2,TOP, i+SCRN_W2+2,TOP+5, (i % 4 > 0));
-        }
-    }
-    else {
-        // for (int i = w; i=0; i--) {
-        for (int i = 0; i < w; i++) {
-            display.drawLine(SCRN_W2 - i-2,TOP, SCRN_W2 - i-2,TOP+5, (i % 4 > 0));
-        }
-    }
-    display.display();
-}
-
 
 /// read hall effect sensor
 float readHES(byte addr) {
-    byte N = 8;  // read N times
+    byte N = 38;  // read N times
     // digitalWriteFast(MAG_PWR_PIN,1);
     // delay(24);  // turn on sensors and let settle
     uint16_t ADC = readADC(addr, N);
@@ -180,6 +153,32 @@ uint16_t readADC(byte addr, byte N) {
     return (uint16_t)ADC;
 }
 
+void oledDrawBarGraph(int val) {
+    byte SCRN_W = 128;
+    byte SCRN_W2 = SCRN_W / 2;
+    byte TOP = 20;
+    byte HT  = 5;
+    int w = map(int(abs(val)),1,(V_ref*abs(G_scale)/2),0,SCRN_W2);
+    display.fillRect(0,TOP,SCRN_W,HT-0,0);                      // blank the rows
+    for (int i = 0; i < SCRN_W; i++) {
+        display.drawLine(i,TOP+HT-1, i,TOP+HT-1, (i % 4 > 0));  // draw H axis
+    }
+    display.fillRect(SCRN_W2-1,TOP-4, 3,HT+3,  1);                // center mark
+    // draw a bunch of short vertical lines to make bar graph
+    if (val >= 0) { // NORTH
+        for (int i = 0; i < w; i++) {
+            display.drawLine(i+SCRN_W2,TOP, i+SCRN_W2,TOP+HT-1, (i==0 || i % 4 > 0));
+        }
+    }
+    else {          // SOUTH
+        // for (int i = w; i=0; i--) {
+        for (int i = 0; i < w; i++) {
+            display.drawLine(SCRN_W2 - i-1,TOP, SCRN_W2 - i-1,TOP+HT-1, (i==0 || i % 4 > 0));
+        }
+    }
+    display.display();
+}
+
 ///
 void splashLED(uint8_t pin, uint8_t n) {
     for (uint8_t i = 0; i < n; i++) {
@@ -190,8 +189,6 @@ void splashLED(uint8_t pin, uint8_t n) {
     }
     delay(100);
 }
-
-
 
 ///
 void initializeStuff() {
