@@ -86,22 +86,25 @@ void loop() {
     V = V_ref * (float)adc / pow(2, ADC_MAX_VAL); // +-1.0 f.s.
     V = V * k + V_prev * (1 - k);               // filter it
     V_prev = V;
-    float G = G_scale * (V - (V_ref / 2) - ofst); // mid value is 0 flux; N/S indicated by polarity
-    if (abs(G) < 2.0) G = 0.0001;               // ignore small fluctuations near zero
-    if (sec > 0) {                              // wait for value to settle at beginning
-        // Pf("    %5u %5.3fV %5.1fG %s \r", adc, V, abs(G), pole);
-        Pf("  %5.1f \n", G);
-    #if 1       
-        subcount *= (subcount < 50/HES_INTERVAL);               // zero it every N iterations to keep display smooth and loop fast
-        if (subcount++ == 0) {
-            oledDrawBarGraph(G);
+        G = G_scale * (V - (V_ref / 2) - ofst);     // mid value is 0 flux; N/S indicated by polarity
+        if (abs(G) < 2.0)
+            G = 0.0001;                             // ignore small fluctuations near zero
+        if (total_sec > 0) {                              // wait for value to settle at beginning
+            Pf("  %5.1f \n", G);   // Pf("    %5u %5.3fV %5.1fG %s \r", adc, V, abs(G), pole);
+        }
+    }
+
+    if (since_oled >= OLED_INTERVAL) {              // update OLED screen
+        pole[1] = '\0';                             // display N or S
             // print Gauss value
             display.setTextSize(XLARGE);
             display.setCursor(-4, 37);
-            sprintf(msg, "%4.0f", G);   
+        if (abs(G) < 1200) {
+            oledDrawBarGraph(G);
+            sprintf(msg, "%4.0f ", G);
             display.print(msg);
             display.setTextSize(LARGE);
-            display.setCursor(112, 36);         // on bottom row of pixels
+            display.setCursor(111, 36);             // on bottom row of pixels
             // print the pole (negative = South)
             if (abs(G) <= 2.0)  pole[0] = ' ';
             else if (G > 0)     pole[0] = 'N';
@@ -130,10 +133,6 @@ void loop() {
       //delay(500); initializeStuff(); //initOled();
       // initializeStuff(); //initOled();
       //  initOled(); delay(500);
-      if (i2cScan(0) > 0) {
-        initOled();
-        delay(400);
-      }
       if (i2cScan(0) > 0) {
         initOled();
         delay(400);
@@ -178,6 +177,7 @@ uint16_t readADC(byte addr, byte N) {
   return (uint16_t)ADC;
 }
 
+///
 void oledDrawBarGraph(int val) {
   byte SCRN_W = 128;
   byte SCRN_W2 = SCRN_W / 2;
@@ -291,16 +291,20 @@ int i2cScan(int printFlag) {
         Serial.print("I2C device at 0x");
         if (address < 0x10) Serial.print("0");  // leading zero
         Serial.print(address, HEX);
-        Serial.print("\t "); Serial.println(address); // dec
+                Serial.print("\t ");
+                Serial.println(address); // dec
       }
       nDevices++;
     }
     else if (error > 0 && error != 99) {     // 2 = no device
       if (printFlag == 2) {
-        Serial.print("   Error:"); Serial.print(error); Serial.print(" at 0x");
+                Serial.print("   Error:");
+                Serial.print(error);
+                Serial.print(" at 0x");
         if (address < 0x10) Serial.print("0");   // leading zero
         Serial.print(address, HEX);
-        Serial.print("\t "); Serial.println(address); // dec
+                Serial.print("\t ");
+                Serial.println(address); // dec
       }
     }
   }
