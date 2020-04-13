@@ -134,10 +134,6 @@ void loop() {
         initOled();
         delay(400);
       }
-      if (i2cScan(0) > 0) {
-        initOled();
-        delay(400);
-      }
     }
   }
 
@@ -178,6 +174,7 @@ uint16_t readADC(byte addr, byte N) {
   return (uint16_t)ADC;
 }
 
+///
 void oledDrawBarGraph(int val) {
   byte SCRN_W = 128;
   byte SCRN_W2 = SCRN_W / 2;
@@ -291,16 +288,20 @@ int i2cScan(int printFlag) {
         Serial.print("I2C device at 0x");
         if (address < 0x10) Serial.print("0");  // leading zero
         Serial.print(address, HEX);
-        Serial.print("\t "); Serial.println(address); // dec
+                Serial.print("\t ");
+                Serial.println(address); // dec
       }
       nDevices++;
     }
     else if (error > 0 && error != 99) {     // 2 = no device
       if (printFlag == 2) {
-        Serial.print("   Error:"); Serial.print(error); Serial.print(" at 0x");
+                Serial.print("   Error:");
+                Serial.print(error);
+                Serial.print(" at 0x");
         if (address < 0x10) Serial.print("0");   // leading zero
         Serial.print(address, HEX);
-        Serial.print("\t "); Serial.println(address); // dec
+                Serial.print("\t ");
+                Serial.println(address); // dec
       }
     }
   }
