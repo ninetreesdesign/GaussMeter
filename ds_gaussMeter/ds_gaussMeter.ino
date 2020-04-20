@@ -1,10 +1,9 @@
 /*  @name make a gaussmeter from a linear Hall-Effect Sensor, analog out
-    @description read from original HES Si72B218 (can find no data for this part; guessing at sensitivity of 5mV/G.
-                 plan to change to A1308 1.3mV/G for bigger range
-                 HW is T3.2 and 128x64 I2C OLED
+    @description Usethe Allegro A1308 1.3mV/G lowest sensitivity available for highest flux range
+                 Uses the Teensy 3.2 and 128x64 I2C OLED
     todo:
-    4/13/2020   done add units option (flag in code)
-    4/13/2020   add a button to zero the offset
+        add a button input for user to zero the offset
+        add a photo of device and a schematic to git repo
 */
 
 #ifndef ARDUINO_H
@@ -20,30 +19,27 @@
 #include <Adafruit_GFX.h>       // https://learn.adafruit.com/adafruit-gfx-graphics-library/graphics-primitives
 #include <Adafruit_SSD1306.h>   // OLED display
 // printing shortcuts
-#define HWSERIAL Serial1        // optional output to hardware serial
-#define CONSOLE Serial          // USB port debug console (IDE)
 #define P   Serial.print
 #define Pf  Serial.printf
 #define Pln Serial.println
 
 /////////////////////////////// User Settings //////////////////////////////////////////////////
 const String   TITLE         = "Gauss Meter";
-const String   VERSION_NUM   = "v1.2.1";    // fixed oled update counter, startup string printing
+const String   VERSION_NUM   = "v1.2.2";    // removed unused code
 const uint16_t LED_INTERVAL  = 1000;
-const uint16_t HES_INTERVAL  = 5;//350;     // much faster output rate to capture moving field
+const uint16_t HES_INTERVAL  = 5;           // fast output rate to capture changing field
 const uint16_t OLED_INTERVAL = 200;
-const bool     HWSERIAL_FLAG = 0;           // send msgs to hardware serial port
-const bool     CONSOLE_FLAG  = 1;           // Route text msgs to standard output port
+const bool     CONSOLE_FLAG  = 1;           // Route readings to standard output port
 const bool     OLED_TIME_FLAG = 1;          // include elapsed time on oled screen
-const bool     TESLA_UNITS_FLAG = 0;
+const bool     TESLA_UNITS_FLAG = 0;        // Gauss/Teslas
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 const uint8_t HES_PIN        = A2;          // IN  analog Hall Effect Sensor
 const uint8_t STATUS_LED_PIN =  9;          // OUT PWM
-const uint8_t OLED_RESET_PIN = -1;  // none on board  14;          // not used?
+const uint8_t OLED_RESET_PIN = -1;          // none on board  
 const uint8_t MAG_PWR_PIN    = 12;
-const uint8_t OLED_PWR_PIN   = 21;
-const uint8_t OLED_GND_PIN   = 20;
+const uint8_t OLED_PWR_PIN   = 21;          // powered from adjacent I/O pins for easy mounting
+const uint8_t OLED_GND_PIN   = 20;          //    "
 
 // font sizes
 const uint8_t SMALL  = 1;
@@ -57,13 +53,13 @@ const float    HES_SENSITIVITY = 1.3e-3;    // PN A1308:1.3mV/G
 const float    G_scale = -1 * 1 / HES_SENSITIVITY; // polarity and sensor's sensitivity
 const float    ofst = (42-21) * HES_SENSITIVITY; // observed for each sensor
 const float    V_ref = 3.297;
-const float    k = 0.70;                    // filter smoothing factor
+const float    alpha = 0.70;                // filter smoothing factor
 
 char msg[40];                               // container for print strings
 char pole[2];
 String units_string = "";
 
-uint32_t total_sec = 0;
+uint32_t total_sec = 0;                     // 136 yrs worth of seconds
 
 elapsedMillis since_sec     = 0;            // ms to count a sec
 elapsedMillis since_hes     = 0;
@@ -80,7 +76,7 @@ void setup() {
     digitalWrite(OLED_PWR_PIN, 1);
     initializeStuff();                      // IO pin states, serial comm
     readHES(HES_PIN);                       // stabilize initial reading
-    readHES(HES_PIN);
+    delay(200);
 }
 
 ///
@@ -92,21 +88,20 @@ void loop() {
     if (since_hes >= HES_INTERVAL) {                // make flux measurement
         since_hes = 0;
 
-        uint16_t adc = analogRead(HES_PIN);
-        V = V_ref * (float)adc / pow(2, ADC_MAX_VAL);  // +-1.0 f.s.
-        V = V * k + V_prev * (1 - k);               // filter it
+        uint16_t adc = analogRead(HES_PIN);         // read Hall-effect sensor with ADC
+        V = V_ref * (float)adc / pow(2, ADC_MAX_VAL);  // convert to voltage 
+        V = V * alpha + V_prev * (1 - alpha);       // filter it
         V_prev = V;
-        G = G_scale * (V - (V_ref / 2) - ofst);     // mid value is 0 flux; N/S indicated by polarity
+        
+        G = G_scale * (V - (V_ref / 2) - ofst);     // mid value is 0 flux; North = positive
         if (abs(G) < 2.0)
             G = 0.0001;                             // ignore small fluctuations near zero
         T = G/10000;
 
-        if (total_sec > 0) {                        // wait for value to settle at beginning
-            if (TESLA_UNITS_FLAG == 0)
-                Pf("  %5.1f G \n", G);              // print in Gauss units
-            else
-                Pf("  %5.1f mT \n", 1000*T);        // print in mT units
-        }
+        if (TESLA_UNITS_FLAG == 0)
+            Pf("  %5.1f G \n", G);                  // print in Gauss units
+        else
+            Pf("  %5.1f mT \n", 1000*T);            // print in mT units
     }
 
     if (since_oled >= OLED_INTERVAL) {              // update OLED screen
@@ -127,30 +122,6 @@ void loop() {
             display.print(msg);
         }
     }
-#if 0
-    // try to detect and recover if I2C OLED is interrupted
-    if (i2cScan(0) ) {
-        //initializeStuff(); //initOled();
-        //delay(500); initializeStuff(); //initOled();
-        // initializeStuff(); //initOled();
-        //  initOled(); delay(500);
-        if (i2cScan(0) > 0) {
-            initOled();
-            delay(400);
-        }
-    }
-#endif
-
-#if 0
-    // flash status led each interval (second)
-    if (since_led >= LED_INTERVAL) {
-        since_led = 0;
-        analogWrite(STATUS_LED_PIN, 11);            // set very dim
-    }
-    if (since_led >= status_led_flash_duration) {   // turn off led after N ms
-        analogWrite(STATUS_LED_PIN, 0);
-    }
-#endif
 }   // end of loop
 
 
@@ -158,25 +129,21 @@ void loop() {
 
 /// read hall effect sensor
 float readHES(byte addr) {
-    byte N = 8;  // read N times
-    // digitalWriteFast(MAG_PWR_PIN,1);
-    // delay(24);  // turn on sensors and let settle
-    uint16_t ADC = readADC(addr, N);
-    // digitalWriteFast(MAG_PWR_PIN,0);
-    return ADC;
+    byte N = 8;                     // read N times
+    int t  = 200;                   // delay between reads
+    uint16_t adc = readADC(addr, N, t);
+    return (float)adc;
 }
 
 /// read from internal ADC
-uint16_t readADC(byte addr, byte N) {
-    uint32_t ADC = 0;
+uint16_t readADC(byte addr, byte N, int t) {
+    uint32_t adc = 0;
     for (int i = 0; i < N; i++) {
-        ADC += analogRead(addr);
-        delayMicroseconds(100);
+        adc += analogRead(addr);
+        delayMicroseconds(t);
     }
-    ADC /= N;
-    //Serial.println(ADC);
-
-    return (uint16_t)ADC;
+    adc /= N;
+    return (uint16_t)adc;
 }
 
 ///
@@ -263,14 +230,13 @@ void initOled() {
     // oled setup
     // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
-        delay(1000);
+        delay(800);
         Serial.println(F("OLED:   SSD1306 allocation failed."));
     }
     else
         Serial.println("OLED:   initialized");
     display.setTextWrap(false);
     display.setTextColor(WHITE, BLACK);
-    // print splash to OLED and CONSOLE
     display.clearDisplay();
     display.display();
     delay(100);
@@ -281,16 +247,17 @@ void initializeStuff() {
     pinMode(STATUS_LED_PIN, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(MAG_PWR_PIN, OUTPUT);
-
+    // set matching resolutions for ADC & DAC
     analogReadResolution(ADC_MAX_VAL);     // actual ADC resolution is 10 on T3.2
     analogWriteResolution(ADC_MAX_VAL);    // actual internal DAC is 12 on T3.2
     // set faster PWM clock                   https://www.pjrc.com/teensy/td_pulse.html
     analogWriteFrequency(4, 93750 );       // Hz (much faster clock to avoid flickering or audio whine
     analogWriteResolution(8);              // analogWrite value 0 to 2^N-1, or 2^N for steady ON
+    
     if (TESLA_UNITS_FLAG == 0) units_string = " Gauss";
     else units_string = "mTeslas";
     splashLED(LED_BUILTIN, 3);
-    // init OLED display
+    // set up OLED display
     initOled();
     // print title and version
     display.setTextSize(MED);
@@ -299,8 +266,7 @@ void initializeStuff() {
     display.setCursor(24, 32);
     display.print(VERSION_NUM);
     display.display();
-    delay(600);
-    // print screen title
+    delay(400);
     display.clearDisplay();
     display.setTextSize(SMALL);
     display.setCursor(44, 0);               // meter display title
@@ -310,8 +276,9 @@ void initializeStuff() {
     Serial.begin(115200);
     while (!Serial && (millis() < 5000)) {} // include timeout if print console isn't opened
     P(F("USB Serial port initialized.\n"));
+    
     // print configuration
-    Pf("Version:     ");
+    P("Version:     ");
     Pln(VERSION_NUM);
     Pf("Sensitivity: %3.1fmV/G\n", 1000*HES_SENSITIVITY);
     Pf("G_scale:     %5.1f \n", G_scale);
@@ -319,53 +286,6 @@ void initializeStuff() {
     Pf("V_ref:       %5.3fV\n", V_ref);
     P ("Units:       ");
     Pln(units_string);
-
 }
-
-// --------------------------------------------------
-int i2cScan(int printFlag) {
-    int nDevices = 0;
-    int error = 0;
-
-    for (int address = 1; address < 127; address++ ) {
-        // The i2c_scanner uses the return value of
-        // the Write.endTransmisstion to see if
-        // a device did acknowledge to the address.
-        Wire.beginTransmission(address);
-        error = Wire.endTransmission();
-
-        if (error == 0) {
-            if (printFlag > 0) {
-                Serial.print("I2C device at 0x");
-                if (address < 0x10) Serial.print("0");  // leading zero
-                Serial.print(address, HEX);
-                Serial.print("\t ");
-                Serial.println(address); // dec
-            }
-            nDevices++;
-        }
-        else if (error > 0 && error != 99) {            // 2 = no device
-            if (printFlag == 2) {
-                Serial.print("   Error:");
-                Serial.print(error);
-                Serial.print(" at 0x");
-                if (address < 0x10) Serial.print("0");  // leading zero
-                Serial.print(address, HEX);
-                Serial.print("\t ");
-                Serial.println(address);                // dec
-            }
-        }
-    }
-    if (nDevices == 0) {
-        if (printFlag > 0)  Serial.println("No I2C devices found.\n");
-    }
-    else {
-        if (printFlag > 0) {
-            //     Serial.print(nDevices); Serial.println(" devices found.\n");
-        }
-    }
-    return (nDevices == 0); // 0 for no errors and at least one device;
-}
-
 
 /// EOF
