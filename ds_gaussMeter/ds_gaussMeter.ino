@@ -2,6 +2,9 @@
     @description read from original HES Si72B218 (can find no data for this part; guessing at sensitivity of 5mV/G.
                  plan to change to A1308 1.3mV/G for bigger range
                  HW is T3.2 and 128x64 I2C OLED
+    todo:
+    4/13/2020   done add units option (flag in code)
+    4/13/2020   add a button to zero the offset
 */
 
 #ifndef ARDUINO_H
@@ -25,13 +28,14 @@
 
 /////////////////////////////// User Settings //////////////////////////////////////////////////
 const String   TITLE         = "Gauss Meter";
-const String   VERSION_NUM   = "v1.2.0";    // faster output, switched to A1308 more range
+const String   VERSION_NUM   = "v1.2.1";    // fixed oled update counter, startup string printing
 const uint16_t LED_INTERVAL  = 1000;
 const uint16_t HES_INTERVAL  = 5;//350;     // much faster output rate to capture moving field
 const uint16_t OLED_INTERVAL = 200;
 const bool     HWSERIAL_FLAG = 0;           // send msgs to hardware serial port
 const bool     CONSOLE_FLAG  = 1;           // Route text msgs to standard output port
-const bool     OLED_TIME_FLAG = 1;
+const bool     OLED_TIME_FLAG = 1;          // include elapsed time on oled screen
+const bool     TESLA_UNITS_FLAG = 0;
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 const uint8_t HES_PIN        = A2;          // IN  analog Hall Effect Sensor
@@ -55,8 +59,9 @@ const float    ofst = (42-21) * HES_SENSITIVITY; // observed for each sensor
 const float    V_ref = 3.297;
 const float    k = 0.70;                    // filter smoothing factor
 
-char    msg[40];                            // container for print strings
-char    pole[2];
+char msg[40];                               // container for print strings
+char pole[2];
+String units_string = "";
 
 uint32_t total_sec = 0;
 
@@ -73,20 +78,20 @@ void setup() {
     pinMode(OLED_PWR_PIN, OUTPUT);
     digitalWrite(OLED_GND_PIN, 0);
     digitalWrite(OLED_PWR_PIN, 1);
-    initializeStuff();                              // IO pin states, serial comm
-    readHES(HES_PIN);                               // stabilize initial reading
-    readHES(HES_PIN); 
+    initializeStuff();                      // IO pin states, serial comm
+    readHES(HES_PIN);                       // stabilize initial reading
+    readHES(HES_PIN);
 }
 
 ///
 void loop() {
     static float V;                                 // Voltage
     static float V_prev = 0;                        // keep for 1st order filter
-    float G;                                        // flux (Gauss)
-    
+    static float G;                                 // flux (Gauss)
+    float T;                                        // flux (Tesla)
     if (since_hes >= HES_INTERVAL) {                // make flux measurement
-        static int subcount = 0;                    // update OLED every Nth time
         since_hes = 0;
+
         uint16_t adc = analogRead(HES_PIN);
         V = V_ref * (float)adc / pow(2, ADC_MAX_VAL);  // +-1.0 f.s.
         V = V * k + V_prev * (1 - k);               // filter it
@@ -94,41 +99,19 @@ void loop() {
         G = G_scale * (V - (V_ref / 2) - ofst);     // mid value is 0 flux; N/S indicated by polarity
         if (abs(G) < 2.0)
             G = 0.0001;                             // ignore small fluctuations near zero
-        if (total_sec > 0) {                              // wait for value to settle at beginning
-            Pf("  %5.1f \n", G);   // Pf("    %5u %5.3fV %5.1fG %s \r", adc, V, abs(G), pole);
+        T = G/10000;
+
+        if (total_sec > 0) {                        // wait for value to settle at beginning
+            if (TESLA_UNITS_FLAG == 0)
+                Pf("  %5.1f G \n", G);              // print in Gauss units
+            else
+                Pf("  %5.1f mT \n", 1000*T);        // print in mT units
         }
     }
 
     if (since_oled >= OLED_INTERVAL) {              // update OLED screen
-        pole[1] = '\0';                             // display N or S
-        // print Gauss value
-        display.setTextSize(XLARGE);
-        display.setCursor(-4, 37);
-        if (abs(G) < 1200) {
-            oledDrawBarGraph(G);
-            sprintf(msg, "%4.0f ", G);
-            display.print(msg);
-            display.setTextSize(LARGE);
-            display.setCursor(111, 36);             // on bottom row of pixels
-            // print the pole (negative = South)
-            if (abs(G) <= 2.0)  pole[0] = ' ';
-            else if (G > 0)     pole[0] = 'N';
-            else if (G < 0)     pole[0] = 'S';
-            display.print(pole);
-        }
-        else {              // a high value with a pulldn resistor indicates probe not connected
-            oledDrawBarGraph(0);
-            sprintf(msg, "     ");                  // erase prev value
-            display.print(msg);
-            display.setTextSize(LARGE);
-            display.setCursor(5, 37);
-            sprintf(msg, " Open?   ");
-            display.print(msg);
-            display.setCursor(111, 36);             // on bottom row of pixels
-            pole[0] = ' ';
-            display.print(pole);
-        }
-        display.display();                          // update the screen
+        since_oled = 0;
+        oledUpdateValue(G);
     }
 
     if (since_sec >= 1000) {
@@ -143,20 +126,22 @@ void loop() {
             sprintf(msg, " %02d:%02d:%02d", hour, min, sec);
             display.print(msg);
         }
-
-        // try to detect and recover if I2C OLED is interrupted
-        if (i2cScan(0) ) {
-            //initializeStuff(); //initOled();
-            //delay(500); initializeStuff(); //initOled();
-            // initializeStuff(); //initOled();
-            //  initOled(); delay(500);
-            if (i2cScan(0) > 0) {
-                initOled();
-                delay(400);
-            }
+    }
+#if 0
+    // try to detect and recover if I2C OLED is interrupted
+    if (i2cScan(0) ) {
+        //initializeStuff(); //initOled();
+        //delay(500); initializeStuff(); //initOled();
+        // initializeStuff(); //initOled();
+        //  initOled(); delay(500);
+        if (i2cScan(0) > 0) {
+            initOled();
+            delay(400);
         }
     }
+#endif
 
+#if 0
     // flash status led each interval (second)
     if (since_led >= LED_INTERVAL) {
         since_led = 0;
@@ -165,7 +150,8 @@ void loop() {
     if (since_led >= status_led_flash_duration) {   // turn off led after N ms
         analogWrite(STATUS_LED_PIN, 0);
     }
-}
+#endif
+}   // end of loop
 
 
 /* Functions */
@@ -194,14 +180,53 @@ uint16_t readADC(byte addr, byte N) {
 }
 
 ///
+void oledUpdateValue( float G) {
+// read flux
+// a high value means open probe
+// use global units flag to convert to Tesla if set
+    pole[1] = '\0';                             // display N or S
+    // print Gauss value
+    display.setTextSize(XLARGE);
+    display.setCursor(-4, 37);
+
+    if (abs(G) < 1200) {                        // high value
+        oledDrawBarGraph(G);
+        if (TESLA_UNITS_FLAG == 0)
+            sprintf(msg, "%4.0f ", G);
+        else
+            sprintf(msg, "%5.1f mT", 1000*(G/10000));
+        display.print(msg);
+        display.setTextSize(LARGE);
+        display.setCursor(104, 36);             // on bottom row of pixels
+        // print the pole (negative = South)
+        if (abs(G) <= 2.0)  pole[0] = ' ';
+        else if (G > 0)     pole[0] = 'N';
+        else if (G < 0)     pole[0] = 'S';
+        display.print(pole);
+    }
+    else {              // a high value with a pulldn resistor indicates probe not connected
+        oledDrawBarGraph(0);
+        sprintf(msg, "     ");                  // erase prev value
+        display.print(msg);
+        display.setTextSize(LARGE);
+        display.setCursor(5, 37);
+        sprintf(msg, " Open?   ");
+        display.print(msg);
+        display.setCursor(111, 36);             // on bottom row of pixels
+        pole[0] = ' ';
+        display.print(pole);
+    }
+    display.display();                          // update the screen
+}
+
+///
 void oledDrawBarGraph(int val) {
     byte SCRN_W = 128;
     byte SCRN_W2 = SCRN_W / 2;
     byte TOP = 20;
     byte HT  = 5;
-    // scale bar width to max Gauss range
+    // scale bar width to max Gauss range 
     int w = map(int(abs(val)), 1, (V_ref/2 / HES_SENSITIVITY), 0, SCRN_W2); // ~ +-1200G
-
     display.fillRect(0, TOP, SCRN_W, HT - 0, 0);                // blank the rows
     for (int i = 0; i < SCRN_W; i++) {
         display.drawLine(i, TOP + HT - 1, i, TOP + HT - 1, (i % 4 > 0)); // draw H axis
@@ -239,10 +264,10 @@ void initOled() {
     // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
         delay(1000);
-        Serial.println(F("    OLED SSD1306 allocation failed."));
+        Serial.println(F("OLED:   SSD1306 allocation failed."));
     }
     else
-        Serial.println("OLED");
+        Serial.println("OLED:   initialized");
     display.setTextWrap(false);
     display.setTextColor(WHITE, BLACK);
     // print splash to OLED and CONSOLE
@@ -262,9 +287,12 @@ void initializeStuff() {
     // set faster PWM clock                   https://www.pjrc.com/teensy/td_pulse.html
     analogWriteFrequency(4, 93750 );       // Hz (much faster clock to avoid flickering or audio whine
     analogWriteResolution(8);              // analogWrite value 0 to 2^N-1, or 2^N for steady ON
-
+    if (TESLA_UNITS_FLAG == 0) units_string = " Gauss";
+    else units_string = "mTeslas";
     splashLED(LED_BUILTIN, 3);
+    // init OLED display
     initOled();
+    // print title and version
     display.setTextSize(MED);
     display.setCursor(0, 0);
     display.print(TITLE);
@@ -272,21 +300,25 @@ void initializeStuff() {
     display.print(VERSION_NUM);
     display.display();
     delay(600);
+    // print screen title
     display.clearDisplay();
     display.setTextSize(SMALL);
-    display.setCursor(51, 0);
-    display.print("Gauss");
+    display.setCursor(44, 0);               // meter display title
+    display.print(units_string);
 
     // initialize console Serial port
     Serial.begin(115200);
     while (!Serial && (millis() < 5000)) {} // include timeout if print console isn't opened
-    P(F("\n    Serial port(s) initialized.\n"));
-
+    P(F("USB Serial port initialized.\n"));
+    // print configuration
+    Pf("Version:     ");
     Pln(VERSION_NUM);
     Pf("Sensitivity: %3.1fmV/G\n", 1000*HES_SENSITIVITY);
     Pf("G_scale:     %5.1f \n", G_scale);
     Pf("Offset:      %5.3fV\n", ofst);
-    Pf("V_ref:       %5.3fV\n\n", V_ref);
+    Pf("V_ref:       %5.3fV\n", V_ref);
+    P ("Units:       ");
+    Pln(units_string);
 
 }
 
@@ -312,20 +344,20 @@ int i2cScan(int printFlag) {
             }
             nDevices++;
         }
-        else if (error > 0 && error != 99) {     // 2 = no device
+        else if (error > 0 && error != 99) {            // 2 = no device
             if (printFlag == 2) {
                 Serial.print("   Error:");
                 Serial.print(error);
                 Serial.print(" at 0x");
-                if (address < 0x10) Serial.print("0");   // leading zero
+                if (address < 0x10) Serial.print("0");  // leading zero
                 Serial.print(address, HEX);
                 Serial.print("\t ");
-                Serial.println(address); // dec
+                Serial.println(address);                // dec
             }
         }
     }
     if (nDevices == 0) {
-        if (printFlag > 0)  Serial.println("No devices found.\n");
+        if (printFlag > 0)  Serial.println("No I2C devices found.\n");
     }
     else {
         if (printFlag > 0) {
